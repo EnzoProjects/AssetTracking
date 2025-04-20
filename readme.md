@@ -5,11 +5,10 @@
   <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
 </a>
 ![Tests](https://github.com/uwidcit/flaskmvc/actions/workflows/dev.yml/badge.svg)
-![Deploy Status]([https://github.com/uwidcit/flaskmvc/actions/workflows/deploy.yml/badge.svg](https://asset-tracking-rzc0.onrender.com/))
 
 A web application for tracking assets, their locations, assignments, and audit history, built using Flask and structured with the Model-View-Controller (MVC) pattern. Originally based on the [Flask MVC Template](https://github.com/uwidcit/flaskmvc).
 
-**Live Demo:** [https://flask-postgres-api.onrender.com/]([https://flask-postgres-api.onrender.com/](https://asset-tracking-rzc0.onrender.com/)) (Note: May take a moment to spin up on Render's free tier)
+**Live Demo:** [https://flask-postgres-api.onrender.com/](https://asset-tracking-rzc0.onrender.com) (Note: May take a moment to spin up on Render's free tier)
 **Postman Collection:** [View API Docs](https://documenter.getpostman.com/view/583570/2s83zcTnEJ)
 
 ## Features
@@ -42,6 +41,7 @@ The project follows the MVC pattern:
 
 *   Python 3.9+ / pip3
 *   Packages listed in `requirements.txt` (includes Flask, SQLAlchemy, JWT, Psycopg2, Gunicorn, etc.)
+*   **System Dependencies (for `mysqlclient` build):** `libmysqlclient-dev` (Debian/Ubuntu) or equivalent MySQL/MariaDB development headers.
 
 ## Installation
 
@@ -55,7 +55,20 @@ The project follows the MVC pattern:
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     ```
-3.  **Install dependencies:**
+3.  **Install System Dependencies (if needed for `mysqlclient`):**
+    *   If `pip install` later fails on `mysqlclient`, you might need development headers.
+    *   **On Debian/Ubuntu:**
+        ```bash
+        sudo apt update
+        sudo apt install libmysqlclient-dev gcc pkg-config
+        ```
+    *   **On macOS (using Homebrew):**
+        ```bash
+        brew install mysql # Or mariadb
+        # Ensure mysql_config is in your PATH or set environment variables
+        ```
+    *   **On other systems:** Install the appropriate MySQL or MariaDB development package.
+4.  **Install Python dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
@@ -99,7 +112,7 @@ When deploying to Render (or similar platforms):
 3.  **Email:** Configure `MAIL_USERNAME`, `MAIL_PASSWORD`, etc., as Environment Variables in Render.
 4.  **Set `ENV=production`:** Ensure this environment variable is set in Render. This is crucial for using the production database and other settings. The `render.yaml` file sets this.
 
-![Render Environment Variables Example](./images/fig1.png) 
+![Render Environment Variables Example](./images/fig1.png) *(Note: This image might be slightly outdated, refer to the Render dashboard)*
 
 ## Flask Commands (`wsgi.py`)
 
@@ -247,6 +260,17 @@ Generate test coverage reports:
 
 ## Troubleshooting
 
+*   **`pip install` Fails (Development):** If `pip install -r requirements.txt` fails, particularly on the `mysqlclient` package, you may need to install system-level development headers.
+    *   **On Debian/Ubuntu:**
+        ```bash
+        sudo apt update
+        sudo apt install libmysqlclient-dev gcc pkg-config
+        ```
+    *   **On macOS (Homebrew):**
+        ```bash
+        brew install mysql # or mariadb
+        ```
+    *   After installing system dependencies, try `pip install -r requirements.txt` again.
 *   **Views returning 404:** Ensure the view blueprint (e.g., `user_views`) is imported in `App/views/__init__.py` and added to the `views` list.
 *   **Cannot Update Workflow file in Gitpod:** Check your Gitpod GitHub integration permissions. Ensure "workflow" scope is enabled: [Gitpod Integrations](https://gitpod.io/integrations). ![Gitpod Permissions](./images/gitperms.png)
 *   **Database Issues (Local):**
@@ -261,4 +285,4 @@ Generate test coverage reports:
 
 ## Contributing
 
-Contributions are welcome! Please follow standard Gitflow practices. (Add more contributing guidelines if needed).
+Contributions are welcome! Please follow standard Gitflow practices.
