@@ -9,7 +9,7 @@
 
 A web application for tracking assets, their locations, assignments, and audit history, built using Flask and structured with the Model-View-Controller (MVC) pattern. Originally based on the [Flask MVC Template](https://github.com/uwidcit/flaskmvc).
 
-**Live Demo:** [https://flask-postgres-api.onrender.com/](https://flask-postgres-api.onrender.com/) (Note: May take a moment to spin up on Render's free tier)
+**Live Demo:** [https://flask-postgres-api.onrender.com/]([https://flask-postgres-api.onrender.com/](https://asset-tracking-rzc0.onrender.com/)) (Note: May take a moment to spin up on Render's free tier)
 **Postman Collection:** [View API Docs](https://documenter.getpostman.com/view/583570/2s83zcTnEJ)
 
 ## Features
