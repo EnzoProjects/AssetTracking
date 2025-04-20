@@ -1,196 +1,264 @@
+# iGOVTT Asset Tracking System (Based on Flask MVC)
+
 [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/uwidcit/flaskmvc)
 <a href="https://render.com/deploy?repo=https://github.com/uwidcit/flaskmvc">
   <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
 </a>
-
 ![Tests](https://github.com/uwidcit/flaskmvc/actions/workflows/dev.yml/badge.svg)
+![Deploy Status](https://github.com/uwidcit/flaskmvc/actions/workflows/deploy.yml/badge.svg)
 
-# Flask MVC Template
-A template for flask applications structured in the Model View Controller pattern [Demo](https://dcit-flaskmvc.herokuapp.com/). [Postman Collection](https://documenter.getpostman.com/view/583570/2s83zcTnEJ)
+A web application for tracking assets, their locations, assignments, and audit history, built using Flask and structured with the Model-View-Controller (MVC) pattern. Originally based on the [Flask MVC Template](https://github.com/uwidcit/flaskmvc).
 
+**Live Demo:** [https://flask-postgres-api.onrender.com/](https://flask-postgres-api.onrender.com/) (Note: May take a moment to spin up on Render's free tier)
+**Postman Collection:** [View API Docs](https://documenter.getpostman.com/view/583570/2s83zcTnEJ)
 
-# Dependencies
-* Python3/pip3
-* Packages listed in requirements.txt
+## Features
 
-# Installing Dependencies
-```bash
-$ pip install -r requirements.txt
-```
+*   **Asset Management:** Add, view, edit, and delete assets (laptops, projectors, etc.).
+*   **Location Hierarchy:** Manage Buildings, Floors, and Rooms.
+*   **User Authentication:** Secure login, password reset via email.
+*   **Assignee Tracking:** Assign assets to individuals.
+*   **Audit Trail:** Record asset scans and status changes (Good, Missing, Misplaced, Lost).
+*   **Area Audit:** Perform audits using Manual Entry, Barcode, RFID (simulated), or QR Code scanning.
+*   **Discrepancy Reporting:** View and manage assets that are Missing or Misplaced.
+*   **CSV Import/Export:** Bulk import assets and locations; download report templates.
+*   **Settings:** Manage user accounts, locations, and perform bulk operations.
 
-# Configuration Management
+## Project Structure
 
+The project follows the MVC pattern:
 
-Configuration information such as the database url/port, credentials, API keys etc are to be supplied to the application. However, it is bad practice to stage production information in publicly visible repositories.
-Instead, all config is provided by a config file or via [environment variables](https://linuxize.com/post/how-to-set-and-list-environment-variables-in-linux/).
+*   `App/models/`: Defines the database schema (SQLAlchemy models).
+*   `App/controllers/`: Contains the business logic interacting with models.
+*   `App/views/`: Defines Flask blueprints and routes, handling requests and rendering templates.
+*   `App/templates/`: HTML templates (Jinja2).
+*   `App/static/`: Static files (CSS, JavaScript, Images).
+*   `wsgi.py`: Application entry point and Flask CLI commands.
+*   `requirements.txt`: Python dependencies.
+*   `render.yaml`: Configuration for deployment on Render.
+*   `.Dockerfile`: Configuration for building the Docker container.
 
-## In Development
+## Dependencies
 
-When running the project in a development environment (such as gitpod) the app is configured via default_config.py file in the App folder. By default, the config for development uses a sqlite database.
+*   Python 3.9+ / pip3
+*   Packages listed in `requirements.txt` (includes Flask, SQLAlchemy, JWT, Psycopg2, Gunicorn, etc.)
 
-default_config.py
-```python
-SQLALCHEMY_DATABASE_URI = "sqlite:///temp-database.db"
-SECRET_KEY = "secret key"
-JWT_ACCESS_TOKEN_EXPIRES = 7
-ENV = "DEVELOPMENT"
-```
+## Installation
 
-These values would be imported and added to the app in load_config() function in config.py
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/uwidcit/flaskmvc.git
+    cd flaskmvc
+    ```
+2.  **Set up a virtual environment (recommended):**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    ```
+3.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-config.py
-```python
-# must be updated to inlude addtional secrets/ api keys & use a gitignored custom-config file instad
-def load_config():
-    config = {'ENV': os.environ.get('ENV', 'DEVELOPMENT')}
-    delta = 7
-    if config['ENV'] == "DEVELOPMENT":
-        from .default_config import JWT_ACCESS_TOKEN_EXPIRES, SQLALCHEMY_DATABASE_URI, SECRET_KEY
-        config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI
-        config['SECRET_KEY'] = SECRET_KEY
-        delta = JWT_ACCESS_TOKEN_EXPIRES
-...
-```
+## Configuration Management
 
-## In Production
+Configuration (database URLs, secret keys, API keys, email credentials) is managed differently for development and production to avoid committing sensitive information.
 
-When deploying your application to production/staging you must pass
-in configuration information via environment tab of your render project's dashboard.
+### In Development (Local/Gitpod)
 
-![perms](./images/fig1.png)
+1.  **Database:** By default, the app uses a local SQLite database (`temp-database.db`) defined in `App/default_config.py`.
+2.  **Secrets:** `SECRET_KEY` is set in `App/default_config.py`.
+3.  **Email:** Mail settings (`MAIL_SERVER`, `MAIL_USERNAME`, `MAIL_PASSWORD`, etc.) can be set in `App/default_config.py` OR, more securely, in a `.flaskenv` file at the project root.
+    *   **`.flaskenv` (Recommended for local secrets):** Create a file named `.flaskenv` in the project root (this file is usually ignored by git). Add variables like:
+        ```dotenv
+        FLASK_APP=wsgi.py
+        FLASK_DEBUG=True
+        SECRET_KEY='your_development_secret_key' # Override default if needed
+        MAIL_SERVER=smtp.gmail.com
+        MAIL_PORT=587
+        MAIL_USE_TLS=True
+        MAIL_USERNAME=your-dev-email@gmail.com
+        MAIL_PASSWORD=your-gmail-app-password # Use App Passwords for Gmail
+        MAIL_DEFAULT_SENDER='Your App Name <noreply@example.com>'
+        # Add other ENV vars if needed
+        ```
+    *   Flask automatically loads variables from `.flaskenv`. **Do not commit `.flaskenv` if it contains secrets.**
 
-# Flask Commands
+The application loads configuration in this order (later steps override earlier ones):
+1.  `App/default_config.py`
+2.  `App/custom_config.py` (if it exists - useful for local overrides, usually gitignored)
+3.  Environment variables (loaded via `.flaskenv` or system environment)
+4.  Explicit Production Settings (see below)
 
-wsgi.py is a utility script for performing various tasks related to the project. You can use it to import and test any code in the project. 
-You just need create a manager command function, for example:
+### In Production (Render)
 
-```python
-# inside wsgi.py
+When deploying to Render (or similar platforms):
 
-user_cli = AppGroup('user', help='User object commands')
+1.  **Database:** Render automatically provisions a PostgreSQL database and injects connection details (`POSTGRES_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) as environment variables. The `App/config.py` file detects the `ENV=production` variable and constructs the `SQLALCHEMY_DATABASE_URI` from these.
+2.  **Secrets & Keys:** Set `SECRET_KEY`, `JWT_SECRET_KEY` (if used separately), and any other API keys as **Environment Variables** in your Render service dashboard under the "Environment" tab.
+3.  **Email:** Configure `MAIL_USERNAME`, `MAIL_PASSWORD`, etc., as Environment Variables in Render.
+4.  **Set `ENV=production`:** Ensure this environment variable is set in Render. This is crucial for using the production database and other settings. The `render.yaml` file sets this.
 
-@user_cli.cli.command("create-user")
-@click.argument("username")
-@click.argument("password")
-def create_user_command(username, password):
-    create_user(username, password)
-    print(f'{username} created!')
+![Render Environment Variables Example](./images/fig1.png) 
 
-app.cli.add_command(user_cli) # add the group to the cli
+## Flask Commands (`wsgi.py`)
 
-```
+Use Flask's CLI for various tasks. Define custom commands in `wsgi.py`.
 
-Then execute the command invoking with flask cli with command name and the relevant parameters
+**Example: Create a User**
 
-```bash
-$ flask user create bob bobpass
-```
+1.  Command definition in `wsgi.py`:
+    ```python
+    # inside wsgi.py
+    user_cli = AppGroup('user', help='User object commands')
 
+    @user_cli.command("create")
+    @click.argument("email") # Added email
+    @click.argument("username")
+    @click.argument("password")
+    def create_user_command(email, username, password):
+        user = create_user(email, username, password) # Updated controller function likely takes email
+        if user:
+            print(f'User {username} ({email}) created!')
+        else:
+            print(f'User creation failed (email might exist).')
 
-# Running the Project
+    app.cli.add_command(user_cli) # add the group to the cli
+    ```
+2.  Execute from the terminal:
+    ```bash
+    flask user create newuser@example.com newusername newpassword
+    ```
 
-_For development run the serve command (what you execute):_
-```bash
-$ flask run
-```
+**Other built-in/custom commands:**
 
-_For production using gunicorn (what the production server executes):_
-```bash
-$ gunicorn wsgi:app
-```
+*   `flask init`: Initialize the database (drops existing tables, creates schema, adds default data).
+*   `flask db init`: (Run once) Initialize Flask-Migrate.
+*   `flask db migrate -m "Description"`: Create a new database migration script after changing models.
+*   `flask db upgrade`: Apply pending migrations to the database.
+*   `flask run`: Run the development server.
+*   `flask test user`: Run user-related tests (example).
+*   `flask test`: Run all tests using pytest.
 
-# Deploying
-You can deploy your version of this app to render by clicking on the "Deploy to Render" link above.
+## Running the Project
 
-# Initializing the Database
-When connecting the project to a fresh empty database ensure the appropriate configuration is set then file then run the following command. This must also be executed once when running the app on heroku by opening the heroku console, executing bash and running the command in the dyno.
+*   **Development:**
+    ```bash
+    flask run
+    # Access at http://127.0.0.1:8080 (or the port specified)
+    ```
+    *(Flask uses the settings from `.flaskenv` or defaults)*
 
-```bash
-$ flask init
-```
+*   **Production (using Gunicorn):**
+    ```bash
+    gunicorn -c gunicorn_config.py wsgi:app
+    ```
+    *(This is typically executed by the production server, e.g., Render)*
 
-# Database Migrations
-If changes to the models are made, the database must be'migrated' so that it can be synced with the new models.
-Then execute following commands using manage.py. More info [here](https://flask-migrate.readthedocs.io/en/latest/)
+## Deploying to Render
 
-```bash
-$ flask db init
-$ flask db migrate
-$ flask db upgrade
-$ flask db --help
-```
+1.  **Click the "Deploy to Render" button:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/uwidcit/flaskmvc)
+2.  **Or Create Manually:** Create a new "Web Service" on Render, connect your GitHub repository.
+3.  **Build & Start:** Render uses `render.yaml` to determine build (`pip install -r requirements.txt`) and start (`gunicorn wsgi:app`) commands.
+4.  **Environment Variables:** Configure necessary environment variables (like `SECRET_KEY`, `MAIL_PASSWORD`, etc.) in the Render dashboard. The database variables and `ENV=production` are usually set by `render.yaml`.
+5.  **Database Initialization:** After the first deploy, you *must* initialize the database. Go to your service on Render, open the "Shell" tab, and run:
+    ```bash
+    flask init
+    ```
+6.  **Migrations:** If you deploy model changes, run migrations via the Render Shell:
+    ```bash
+    flask db upgrade
+    ```
 
-# Testing
+## Initializing the Database
 
-## Unit & Integration
-Unit and Integration tests are created in the App/test. You can then create commands to run them. Look at the unit test command in wsgi.py for example
+When setting up the project for the first time locally or after deploying to a new production environment with an empty database:
 
-```python
-@test.command("user", help="Run User tests")
-@click.argument("type", default="all")
-def user_tests_command(type):
-    if type == "unit":
-        sys.exit(pytest.main(["-k", "UserUnitTests"]))
-    elif type == "int":
-        sys.exit(pytest.main(["-k", "UserIntegrationTests"]))
-    else:
-        sys.exit(pytest.main(["-k", "User"]))
-```
+1.  Ensure database configuration is correct (SQLite for local default, or ENV VARS for Render/production).
+2.  Run the initialization command:
+    ```bash
+    flask init
+    ```
+    This command (defined in `wsgi.py`) will:
+    *   Drop all existing tables.
+    *   Create all tables based on the models.
+    *   Add default data (e.g., admin user, default Building/Floor, 'UNKNOWN' Room).
 
-You can then execute all user tests as follows
+## Database Migrations
 
-```bash
-$ flask test user
-```
+When you modify your SQLAlchemy models (`App/models/*.py`):
 
-You can also supply "unit" or "int" at the end of the comand to execute only unit or integration tests.
+1.  **Generate Migration Script:**
+    ```bash
+    flask db migrate -m "Brief description of changes"
+    ```
+    *(This creates a script in the `migrations/versions/` directory)*
+2.  **Review the Script:** Check the generated script to ensure it correctly reflects your changes.
+3.  **Apply Migration:**
+    ```bash
+    flask db upgrade
+    ```
+    *(This applies the changes to your database)*
 
-You can run all application tests with the following command
+*   Use `flask db --help` for more options.
+*   More info: [Flask-Migrate Documentation](https://flask-migrate.readthedocs.io/en/latest/)
 
-```bash
-$ pytest
-```
+## CSV Import
 
-## Test Coverage
+The application supports bulk importing of assets and locations via CSV files in the Settings page.
 
-You can generate a report on your test coverage via the following command
+*   **Asset CSV:** Upload a CSV with asset details. Columns typically include `Item`, `Asset Tag`, `Brand`, `Model`, `Serial Number`, `Location` (Room ID or Name), `Condition`, `Assignee` (Assignee ID or Name).
+*   **Location CSV:** Upload a CSV defining the location hierarchy. Columns include `building_id`, `building_name`, `floor_id`, `floor_name`, `room_id`, `room_name`. IDs are optional; if omitted, they will be generated. The system attempts to match existing locations by name/ID before creating new ones.
 
-```bash
-$ coverage report
-```
+Downloadable templates are available in the Settings page via the `/api/download/asset-template` and `/api/download/location-template` endpoints.
 
-You can also generate a detailed html report in a directory named htmlcov with the following comand
+## Testing
 
-```bash
-$ coverage html
-```
+Unit and Integration tests are located in `App/tests/`. Pytest is used as the test runner.
 
-# Troubleshooting
+*   **Run all tests:**
+    ```bash
+    pytest
+    # or
+    flask test
+    ```
+*   **Run specific tests (e.g., user tests):**
+    ```bash
+    flask test user
+    # Run only unit tests for user
+    flask test user unit
+    # Run only integration tests for user
+    flask test user int
+    ```
+    *(Requires corresponding commands defined in `wsgi.py`)*
 
-## Views 404ing
+### Test Coverage
 
-If your newly created views are returning 404 ensure that they are added to the list in main.py.
+Generate test coverage reports:
 
-```python
-from App.views import (
-    user_views,
-    index_views
-)
+*   **Console Report:**
+    ```bash
+    coverage report
+    ```
+*   **HTML Report (in `htmlcov/` directory):**
+    ```bash
+    coverage html
+    ```
 
-# New views must be imported and added to this list
-views = [
-    user_views,
-    index_views
-]
-```
+## Troubleshooting
 
-## Cannot Update Workflow file
+*   **Views returning 404:** Ensure the view blueprint (e.g., `user_views`) is imported in `App/views/__init__.py` and added to the `views` list.
+*   **Cannot Update Workflow file in Gitpod:** Check your Gitpod GitHub integration permissions. Ensure "workflow" scope is enabled: [Gitpod Integrations](https://gitpod.io/integrations). ![Gitpod Permissions](./images/gitperms.png)
+*   **Database Issues (Local):**
+    *   If you added/changed models, run `flask db migrate` and `flask db upgrade`.
+    *   For a complete reset (local dev only!), delete the `temp-database.db` file and run `flask init`.
+*   **Deployment Issues (Render):**
+    *   Check the "Events" and "Logs" tabs in your Render service dashboard for errors.
+    *   Verify all necessary Environment Variables are set correctly in Render.
+    *   Ensure `flask init` (and `flask db upgrade` if needed) was run via the Render Shell after deployment.
+*   **Configuration Errors:** Double-check environment variable names and values, especially for the database connection and secret keys. Ensure `ENV=production` is set for production deployments.
+*   **Email Not Sending:** Verify `MAIL_*` environment variables are correct. Check your email provider's security settings (e.g., Gmail App Passwords). Look for errors in application logs.
 
-If you are running into errors in gitpod when updateding your github actions file, ensure your [github permissions](https://gitpod.io/integrations) in gitpod has workflow enabled ![perms](./images/gitperms.png)
+## Contributing
 
-## Database Issues
-
-If you are adding models you may need to migrate the database with the commands given in the previous database migration section. Alternateively you can delete you database file.
-
-
-This is a test for Github actions
+Contributions are welcome! Please follow standard Gitflow practices. (Add more contributing guidelines if needed).
