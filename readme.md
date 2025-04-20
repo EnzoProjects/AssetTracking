@@ -5,7 +5,7 @@
   <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
 </a>
 ![Tests](https://github.com/uwidcit/flaskmvc/actions/workflows/dev.yml/badge.svg)
-![Deploy Status](https://github.com/uwidcit/flaskmvc/actions/workflows/deploy.yml/badge.svg)
+![Deploy Status]([https://github.com/uwidcit/flaskmvc/actions/workflows/deploy.yml/badge.svg](https://asset-tracking-rzc0.onrender.com/))
 
 A web application for tracking assets, their locations, assignments, and audit history, built using Flask and structured with the Model-View-Controller (MVC) pattern. Originally based on the [Flask MVC Template](https://github.com/uwidcit/flaskmvc).
 
