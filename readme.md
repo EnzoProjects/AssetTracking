@@ -1,15 +1,17 @@
 # iGOVTT Asset Tracking System (Based on Flask MVC)
 
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/uwidcit/flaskmvc)
-<a href="https://render.com/deploy?repo=https://github.com/uwidcit/flaskmvc">
+[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/AssetTrackingProjectATP/flaskmvc)
+<a href="https://render.com/deploy?repo=https://github.com/AssetTrackingProjectATP/flaskmvc">
   <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
 </a>
+
 ![Tests](https://github.com/uwidcit/flaskmvc/actions/workflows/dev.yml/badge.svg)
 
 A web application for tracking assets, their locations, assignments, and audit history, built using Flask and structured with the Model-View-Controller (MVC) pattern. Originally based on the [Flask MVC Template](https://github.com/uwidcit/flaskmvc).
 
-**Live Demo:** [https://flask-postgres-api.onrender.com/](https://asset-tracking-rzc0.onrender.com) (Note: May take a moment to spin up on Render's free tier)
-**Postman Collection:** [View API Docs](https://documenter.getpostman.com/view/583570/2s83zcTnEJ)
+**Live Demo:** [Demo Site](https://asset-tracking-rzc0.onrender.com) (Note: May take a moment to spin up on Render's free tier)
+
+**Postman Collection:** [View API Docs](https://documenter.getpostman.com/view/44230207/2sB2cd5e13)
 
 ## Features
 
@@ -112,7 +114,7 @@ When deploying to Render (or similar platforms):
 3.  **Email:** Configure `MAIL_USERNAME`, `MAIL_PASSWORD`, etc., as Environment Variables in Render.
 4.  **Set `ENV=production`:** Ensure this environment variable is set in Render. This is crucial for using the production database and other settings. The `render.yaml` file sets this.
 
-![Render Environment Variables Example](./images/fig1.png) *(Note: This image might be slightly outdated, refer to the Render dashboard)*
+![Render Environment Variables Example](./images/fig1.png)
 
 ## Flask Commands (`wsgi.py`)
 
@@ -170,7 +172,7 @@ Use Flask's CLI for various tasks. Define custom commands in `wsgi.py`.
 
 ## Deploying to Render
 
-1.  **Click the "Deploy to Render" button:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/uwidcit/flaskmvc)
+1.  **Click the "Deploy to Render" button:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/AssetTrackingProjectATP/flaskmvc)
 2.  **Or Create Manually:** Create a new "Web Service" on Render, connect your GitHub repository.
 3.  **Build & Start:** Render uses `render.yaml` to determine build (`pip install -r requirements.txt`) and start (`gunicorn wsgi:app`) commands.
 4.  **Environment Variables:** Configure necessary environment variables (like `SECRET_KEY`, `MAIL_PASSWORD`, etc.) in the Render dashboard. The database variables and `ENV=production` are usually set by `render.yaml`.
@@ -286,3 +288,9 @@ Generate test coverage reports:
 ## Contributing
 
 Contributions are welcome! Please follow standard Gitflow practices.
+
+## Group Members
+
+*   Analisa Mohamed (816034646)
+*   Phineas Munroe (816038061)
+*   Lorenzo Gould-Davies (816033593)
