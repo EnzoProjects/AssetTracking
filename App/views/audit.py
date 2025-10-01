@@ -52,12 +52,9 @@ def get_rooms(floor_id):
 def get_room_assets(room_id):
     """Get all assets for a given room"""
     try:
-        # Get assets for the room
         room_assets = get_all_assets_by_room_json(room_id)
         
-        # Enhance the assets with room name and assignee information
         for asset in room_assets:
-            # Add room names where possible
             if 'room_id' in asset:
                 room = get_room(asset['room_id'])
                 if room:
@@ -68,11 +65,10 @@ def get_room_assets(room_id):
                 if last_room:
                     asset['last_located_name'] = last_room.room_name
             
-            # Add assignee name information - THIS IS THE FIX
             if asset.get('assignee_id'):
                 assignee = get_assignee_by_id(asset['assignee_id'])
                 if assignee:
-                    asset['assignee_name'] = str(assignee)  # Use __str__
+                    asset['assignee_name'] = str(assignee) 
                 else:
                     asset['assignee_name'] = f"Assignee ID: {asset['assignee_id']}"
             else:
@@ -91,10 +87,8 @@ def get_asset_by_id(asset_id):
     if not asset:
         return jsonify({'message': 'Asset not found'}), 404
     
-    # Get asset data
     asset_json = asset.get_json()
     
-    # Add room names
     if asset.room_id:
         room = get_room(asset.room_id)
         if room:
@@ -105,12 +99,10 @@ def get_asset_by_id(asset_id):
         if last_room:
             asset_json['last_located_name'] = last_room.room_name
     
-    # Add assignee name - THIS IS THE FIX
     if asset.assignee_id:
         assignee = get_assignee_by_id(asset.assignee_id)
         if assignee:
-            asset_json['assignee_name'] = str(assignee)  # Use __str__
-        else:
+            asset_json['assignee_name'] = str(assignee) 
             asset_json['assignee_name'] = f"Assignee ID: {asset.assignee_id}"
     else:
         asset_json['assignee_name'] = "Unassigned"
@@ -137,7 +129,6 @@ def mark_missing():
             'message': 'assetIds must be a list'
         }), 400
     
-    # Pass the current user's ID
     processed_count, error_count, errors = mark_assets_missing(asset_ids, current_user.id)
     
     if processed_count == 0:
@@ -169,14 +160,12 @@ def update_location():
     asset_id = data['assetId']
     room_id = data['roomId']
     
-    # Pass the current user's ID if available
     user_id = current_user.id if current_user else None
     updated_asset = update_asset_location(asset_id, room_id, user_id)
     
     if not updated_asset:
         return jsonify({'success': False, 'message': 'Failed to update asset location'}), 500
     
-    # Add room information to response
     asset_json = updated_asset.get_json()
     
     if updated_asset.room_id:
@@ -189,11 +178,10 @@ def update_location():
         if last_room:
             asset_json['last_located_name'] = last_room.room_name
     
-    # Add assignee name - THIS IS THE FIX
     if updated_asset.assignee_id:
         assignee = get_assignee_by_id(updated_asset.assignee_id)
         if assignee:
-            asset_json['assignee_name'] = str(assignee)  # Use __str__
+            asset_json['assignee_name'] = str(assignee)
         else:
             asset_json['assignee_name'] = f"Assignee ID: {updated_asset.assignee_id}"
     else:
