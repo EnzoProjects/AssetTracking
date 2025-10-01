@@ -1,19 +1,20 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, current_user
+from datetime import datetime
 from App.controllers import (
-    get_asset,
-    mark_asset_lost,
-    mark_asset_found,
-    update_asset_location,
-    bulk_mark_assets_found,
-    bulk_relocate_assets,
-    mark_assets_missing,
-    get_room,
-    get_assignee_by_id
+    # Asset Controllers
+    get_all_assets_json, add_asset, update_asset_details, get_asset,
+    mark_asset_lost, mark_asset_found, update_asset_location,
+    bulk_mark_assets_found, bulk_relocate_assets, mark_assets_missing,
+    # Other Controllers
+    get_room, get_assignee_by_id, get_or_create_assignee_by_name, add_scan_event
 )
 
 asset_views = Blueprint('asset_views', __name__, template_folder='../templates')
 
+asset_views = Blueprint('asset_views', __name__, template_folder='../templates')
+
+# === HELPER FUNCTIONS (MOVE LATER TO UTILS FOLDER) ===
 def enrich_asset_json(asset):
     """Helper function to add related names (room, assignee) to asset JSON."""
     if not asset:
@@ -38,12 +39,66 @@ def enrich_asset_json(asset):
         
     return asset_json
 
+#=== API Endpoints ===
+
+def enrich_asset_collection(assets):
+    """Helper to enrich a list of assets."""
+    for asset in assets:
+        if asset.get('room_id'):
+            room = get_room(asset['room_id'])
+            asset['room_name'] = room.room_name if room else "Unknown"
+        if asset.get('assignee_id'):
+            assignee = get_assignee_by_id(asset['assignee_id'])
+            asset['assignee_name'] = str(assignee) if assignee else "Unassigned"
+    return assets
+
+@asset_views.route('/api/assets', methods=['GET'])
+@jwt_required()
+def get_all_assets():
+    """RESTful: Get the entire collection of assets."""
+    assets = get_all_assets_json()
+    return jsonify(enrich_asset_collection(assets))
+
+@asset_views.route('/api/assets', methods=['POST'])
+@jwt_required()
+def create_asset():
+    """RESTful: Create a new asset in the collection."""
+    data = request.json
+    required = ['id', 'description', 'room_id', 'assignee_name']
+    if not all(k in data for k in required):
+        return jsonify({'success': False, 'message': 'Missing required fields: id, description, room_id, assignee_name'}), 400
+
+    assignee = get_or_create_assignee_by_name(data['assignee_name'])
+    if not assignee:
+        return jsonify({'success': False, 'message': f'Could not find or create assignee "{data["assignee_name"]}".'}), 400
+
+    try:
+        new_asset = add_asset(
+            id=data['id'], description=data['description'], room_id=data['room_id'],
+            assignee_id=assignee.id, model=data.get('model'), brand=data.get('brand'),
+            serial_number=data.get('serial_number'), notes=data.get('notes'),
+            last_located=data['room_id'], last_update=datetime.now()
+        )
+        if not new_asset:
+            return jsonify({'success': False, 'message': f'Asset with ID "{data["id"]}" already exists or Room ID is invalid.'}), 409
+        
+        # Add a scan event for creation
+        add_scan_event(
+            asset_id=new_asset.id, user_id=current_user.id, room_id=new_asset.room_id,
+            status=new_asset.status, notes=f"Asset created by {current_user.username}"
+        )
+        return jsonify({'success': True, 'asset': new_asset.get_json()}), 201
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'An internal server error occurred: {str(e)}'}), 500
+
+
 # === SINGLE ASSET OPERATIONS ===
 
 @asset_views.route('/api/assets/<asset_id>', methods=['GET'])
 @jwt_required()
 def get_single_asset(asset_id):
-    """RESTful: Get a single asset by its ID"""
+    """Get a single asset by its ID"""
     asset = get_asset(asset_id)
     if not asset:
         return jsonify({'success': False, 'message': 'Asset not found'}), 404
@@ -54,7 +109,7 @@ def get_single_asset(asset_id):
 @jwt_required()
 def update_single_asset(asset_id):
     """
-    RESTful: Partially update a single asset.
+    Partially update a single asset.
     This endpoint handles all single-asset updates:
     - Relocating (changing roomId)
     - Marking as lost/found (changing status)
@@ -64,7 +119,22 @@ def update_single_asset(asset_id):
     if not asset:
         return jsonify({'success': False, 'message': 'Asset not found'}), 404
 
-    # Action 1: Relocate the asset
+    # Option 1: Update core details
+    if any(k in data for k in ['description', 'model', 'brand', 'serial_number', 'assignee_id', 'notes']):
+        updated_asset = update_asset_details(
+            asset_id, data.get('description'), data.get('model'), data.get('brand'),
+            data.get('serial_number'), data.get('assignee_id'), data.get('notes')
+        )
+        if not updated_asset:
+            return jsonify({'success': False, 'message': 'Failed to update asset details.'}), 500
+        
+        add_scan_event(
+            asset_id=asset_id, user_id=current_user.id, room_id=updated_asset.room_id,
+            status=updated_asset.status, notes=f"Asset details updated by {current_user.username}"
+        )
+        return jsonify({'success': True, 'message': 'Asset details updated', 'asset': updated_asset.get_json()})
+    
+    # Option 2: Relocate the asset
     if 'roomId' in data:
         new_room_id = data['roomId']
         user_notes = data.get('notes', '')
@@ -78,7 +148,7 @@ def update_single_asset(asset_id):
             'asset': enrich_asset_json(updated_asset)
         })
 
-    # Action 2: Change the asset's status
+    #  Option 3: Change the asset's status
     if 'status' in data:
         new_status = data['status']
         if new_status == 'Lost':
