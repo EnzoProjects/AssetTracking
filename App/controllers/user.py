@@ -41,39 +41,49 @@ def get_all_users_json():
     users = [user.get_json() for user in users]
     return users
 
-def update_user(id, email, username, new_password=None):
-    try:
-        # Convert id to integer if it's a string
-        if isinstance(id, str) and id.isdigit():
-            id = int(id)
-            
-        # Try to get the user directly by id
-        user = User.query.get(id)
-        
-        # If that fails, try filter_by
-        if not user:
-            user = User.query.filter_by(id=id).first()
-            
-        if not user:
-            return None
-            
-        # Update user information
-        user.email = email
+def _update_user_credentials(user, current_password, new_password):
+    """Handles only the password change logic."""
+    if not new_password:
+        return None, 200 # No error, nothing to do
+    if not current_password or not user.check_password(current_password):
+        return "Current password is incorrect", 401
+    user.set_password(new_password)
+    return None, 200
+
+def _update_user_details(user, username, email):
+    """Handles only the username/email change logic."""
+    if username and username != user.username:
+        if User.query.filter(User.id != user.id, User.username == username).first():
+            return "Username already taken", 409
         user.username = username
+    if email and email != user.email:
+        if User.query.filter(User.id != user.id, User.email == email).first():
+            return "Email already taken", 409
+        user.email = email
+    return None, 200
+
+# This is your main public-facing controller function
+def update_user(user_id, email=None, username=None, current_password=None, new_password=None):
+    user = User.query.get(user_id)
+    if not user:
+        return None, "User not found", 404
+
+    # Call helper functions
+    error_msg, status_code = _update_user_credentials(user, current_password, new_password)
+    if error_msg:
+        return None, error_msg, status_code
+
+    error_msg, status_code = _update_user_details(user, username, email)
+    if error_msg:
+        return None, error_msg, status_code
         
-        # Update password if provided
-        if new_password:
-            user.set_password(new_password)
-            
-        # Add the user and commit the changes
-        db.session.add(user)
+    try:
+        # One single commit for all changes
         db.session.commit()
-        return True
+        return user, None, 200
     except Exception as e:
-        # Rollback the session
         db.session.rollback()
-        print(f"Error updating user: {e}")
-        return None
+        return None, "An internal error occurred", 500
 
 def delete_user(id):
     try:
@@ -87,7 +97,7 @@ def delete_user(id):
         db.session.rollback()
         print(f"Error deleting user: {e}")
         return False
-    
+       
   
 def generate_reset_token(email):
     """Generate a secure time-limited token for password reset"""

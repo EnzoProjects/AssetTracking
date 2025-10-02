@@ -23,14 +23,20 @@ def get_all_floors_json():
     floors = [floor.get_json() for floor in floors]
     return floors
 
-def update_floor(floor_id, building_id, floor_name):
+def update_floor(floor_id, building_id=None, floor_name=None):
     floor = get_floor(floor_id)
-    if not floor: return None
-    floor.building_id = building_id
-    floor.floor_name = floor_name
+    if not floor:
+        return None
+
+    if building_id:
+        floor.building_id = building_id
+    
+    if floor_name:
+        floor.floor_name = floor_name
+
     try:
         db.session.commit()
-        return True
+        return floor 
     except Exception as e:
         db.session.rollback()
         print(f"Error updating floor: {e}")

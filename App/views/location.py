@@ -59,6 +59,23 @@ def get_floors(building_id):
     floors = get_floors_by_building(building_id)
     return jsonify([f.get_json() for f in floors])
 
+@location_views.route('/api/floors/<floor_id>', methods=['PATCH'])
+@jwt_required()
+def edit_floor(floor_id):
+    data = request.json
+    building_id = data.get('building_id')
+    name = data.get('floor_name', '').strip()
+
+    # Ensure at least one field is being updated
+    if not building_id and not name:
+        return jsonify({'success': False, 'message': 'No update information provided'}), 400
+
+    floor = update_floor(floor_id, building_id, name)
+    if floor:
+        return jsonify({'success': True, 'message': 'Floor updated', 'floor': floor.get_json()})
+    
+    return jsonify({'success': False, 'message': 'Floor not found or error updating'}), 404
+
 @location_views.route('/api/floors', methods=['POST'])
 @jwt_required()
 def add_floor():
@@ -82,6 +99,7 @@ def get_rooms(floor_id):
     rooms = get_rooms_by_floor(floor_id)
     return jsonify([r.get_json() for r in rooms])
 
+
 @location_views.route('/api/rooms', methods=['POST'])
 @jwt_required()
 def add_room():
@@ -96,3 +114,18 @@ def add_room():
     if room:
         return jsonify({'success': True, 'message': 'Room created', 'room': room.get_json()}), 201
     return jsonify({'success': False, 'message': 'Failed to create room, check if floor exists'}), 400
+
+@location_views.route('/api/rooms/<room_id>', methods=['PATCH'])
+@jwt_required()
+def edit_room(room_id):
+    data = request.json
+    name = data.get('room_name', '').strip()
+    floor_id = data.get('floor_id',' ').strip()
+
+    if not name:
+        return jsonify({'success': False, 'message': 'Room name is required'}), 400
+
+    room = update_room(room_id, floor_id, name)
+    if room:
+        return jsonify({'success': True, 'message': 'Room updated', 'room': room.get_json()})
+    return jsonify({'success': False, 'message': 'Room not found or error updating'}), 404

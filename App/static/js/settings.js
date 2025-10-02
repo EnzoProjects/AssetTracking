@@ -96,8 +96,8 @@ const AccountSettings = {
         }
         
         try {
-            const response = await fetch('/api/user/update', {
-                method: 'POST',
+            const response = await fetch('/api/user/me', {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
                 },
@@ -210,9 +210,9 @@ const CsvUploader = {
         
         let endpoint = '';
         if (type === 'asset') {
-            endpoint = '/api/upload/assets-csv';
+            endpoint = '/api/imports/assets';
         } else if (type === 'location') {
-            endpoint = '/api/upload/locations-csv';
+            endpoint = '/api/imports/locations';
         }
         
         try {
@@ -443,7 +443,7 @@ const LocationManager = {
         }
         
         try {
-            const response = await fetch('/api/building/add', {
+            const response = await fetch('/api/buildings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -506,8 +506,8 @@ const LocationManager = {
         }
         
         try {
-            const response = await fetch(`/api/building/${buildingId}/update`, {
-                method: 'POST',
+            const response = await fetch(`/api/building/${buildingId}`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
                 },
@@ -546,7 +546,7 @@ const LocationManager = {
         }
         
         try {
-            const response = await fetch(`/api/building/${buildingId}/delete`, {
+            const response = await fetch(`/api/building/${buildingId}`, {
                 method: 'DELETE'
             });
             
@@ -591,7 +591,7 @@ const LocationManager = {
                 </div>
             `;
             
-            const response = await fetch(`/api/floors/${buildingId}`);
+            const response = await fetch(`/api/buildings/${buildingId}/floors`);//ASK ABOUT THIS, NO METHOD DEFINED
             
             if (!response.ok) {
                 throw new Error('Failed to fetch floors');
@@ -767,7 +767,7 @@ const LocationManager = {
         }
         
         try {
-            const response = await fetch(`/api/floor/${floorId}/update`, {
+            const response = await fetch(`/api/floors/${floorId}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -863,7 +863,7 @@ const LocationManager = {
                 </div>
             `;
             
-            const response = await fetch(`/api/rooms/${floorId}`);
+            const response = await fetch(`/api/floors/${floorId}/rooms`);
             
             if (!response.ok) {
                 throw new Error('Failed to fetch rooms');
@@ -936,7 +936,7 @@ const LocationManager = {
         }
         
         try {
-            const response = await fetch('/api/room/add', {
+            const response = await fetch('/api/rooms', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1005,8 +1005,8 @@ const LocationManager = {
         }
         
         try {
-            const response = await fetch(`/api/room/${roomId}/update`, {
-                method: 'POST',
+            const response = await fetch(`/api/rooms/${roomId}`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
                 },

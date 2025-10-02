@@ -36,8 +36,8 @@ def update_room(room_id, floor_id, room_name):
     room.room_name = room_name
     
     try:
-        db.session.commit()  # ADD THIS
-        return room  # Return the room to indicate success
+        db.session.commit()  
+        return room 
     except Exception as e:
         db.session.rollback()
         print(f"Error updating room: {e}")
