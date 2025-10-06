@@ -213,7 +213,7 @@ async function loadRoomsForModal() {
     selectElement.innerHTML = '<option value="" selected disabled>Loading rooms...</option>';
     
     try {
-        const response = await fetch('/api/rooms/all');
+        const response = await fetch('/api/rooms');
         if (!response.ok) {
             throw new Error('Failed to fetch rooms');
         }
@@ -282,7 +282,7 @@ async function saveNewAsset() {
             saveBtn.disabled = true;
         }
         
-        const response = await fetch('/api/asset/add', {
+        const response = await fetch('/api/assets', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -387,7 +387,7 @@ function displayAssets(assets) {
             <td>${assigneeName}</td>
             <td>${lastUpdate}</td>
             <td>
-                <a href="/asset/${assetId}" class="btn btn-sm btn-outline-primary" title="Edit Asset">
+                <a href="/inventory/asset/${assetId}" class="btn btn-sm btn-outline-primary" title="Edit Asset">
                     <i class="bi bi-pencil"></i>
                 </a>
             </td>

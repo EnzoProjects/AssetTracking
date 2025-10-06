@@ -99,6 +99,11 @@ def get_rooms(floor_id):
     rooms = get_rooms_by_floor(floor_id)
     return jsonify([r.get_json() for r in rooms])
 
+@location_views.route('/api/rooms', methods=['GET'])
+@jwt_required()
+def get_all_rooms():
+    rooms = get_all_rooms()
+    return jsonify([r.get_json() for r in rooms])
 
 @location_views.route('/api/rooms', methods=['POST'])
 @jwt_required()

@@ -55,14 +55,14 @@ def enrich_asset_collection(assets):
 @asset_views.route('/api/assets', methods=['GET'])
 @jwt_required()
 def get_all_assets():
-    """RESTful: Get the entire collection of assets."""
+    """Get the entire collection of assets."""
     assets = get_all_assets_json()
     return jsonify(enrich_asset_collection(assets))
 
 @asset_views.route('/api/assets', methods=['POST'])
 @jwt_required()
 def create_asset():
-    """RESTful: Create a new asset in the collection."""
+    """Create a new asset in the collection."""
     data = request.json
     required = ['id', 'description', 'room_id', 'assignee_name']
     if not all(k in data for k in required):

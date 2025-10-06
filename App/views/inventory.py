@@ -31,13 +31,12 @@ def asset_report_page(asset_id):
     scan_events = get_scans_by_asset(asset_id)
     enriched_scan_events = []
     for event in scan_events:
-        event_dict = event.get_json()
         scan_room = get_room(event.room_id)
-        event_dict['room_name'] = scan_room.room_name if scan_room else f"Room {event.room_id}"
-        enriched_scan_events.append(event_dict)
+        event.room_name = scan_room.room_name if scan_room else f"Room {event.room_id}"
+        enriched_scan_events.append(event)
 
-    enriched_scan_events.sort(key=lambda e: e.get('scan_time', datetime.min), reverse=True)
-
+    enriched_scan_events.sort(key=lambda e: e.scan_time or datetime.min, reverse=True)
+    
     return render_template('asset.html',
                           asset=asset,
                           room_name=room_name,
