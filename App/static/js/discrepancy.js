@@ -62,85 +62,35 @@ const API = {
     },
     
     /**
-     * Mark an asset as lost
-     * @param {string} assetId - The ID of the asset to mark as lost
-     * @returns {Promise<Object>} Promise resolving to the API response
+     * Partially updates a single asset using the PATCH endpoint.
+     * This is the new, consolidated function for all single-asset updates.
+     * @param {string} assetId - The ID of the asset to update.
+     * @param {object} updateData - An object with the fields to change (e.g., { status: 'Lost' }).
+     * @returns {Promise<Object>} Promise resolving to the API response.
      */
-    async markAssetAsLost(assetId) {
+    async updateAsset(assetId, updateData) {
         try {
-            const response = await fetch(`/api/asset/${assetId}/mark-lost`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Error marking asset as lost:', error);
-            throw error;
-        }
-    },
-    
-    /**
-     * Mark an asset as found
-     * @param {string} assetId - The ID of the asset to mark as found
-     * @returns {Promise<Object>} Promise resolving to the API response
-     */
-    async markAssetAsFound(assetId) {
-        try {
-            const response = await fetch(`/api/asset/${assetId}/mark-found`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Error marking asset as found:', error);
-            throw error;
-        }
-    },
-    
-    /**
-     * Relocate an asset to a new location
-     * @param {string} assetId - The ID of the asset to relocate
-     * @param {string} newRoomId - The ID of the new room
-     * @param {string} notes - Optional notes for the relocation
-     * @returns {Promise<Object>} Promise resolving to the API response
-     */
-    async relocateAsset(assetId, newRoomId, notes = '') {
-        try {
-            const response = await fetch(`/api/asset/${assetId}/relocate`, {
-                method: 'POST',
+            const response = await fetch(`/api/assets/${assetId}`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    roomId: newRoomId,
-                    notes: notes
-                })
+                body: JSON.stringify(updateData)
             });
-            
+
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                const errorResult = await this.parseJsonSafely(response);
+                const message = errorResult ? errorResult.message : `API error: ${response.status}`;
+                throw new Error(message);
             }
-            
+
             return await response.json();
         } catch (error) {
-            console.error('Error relocating asset:', error);
+            console.error(`Error updating asset ${assetId}:`, error);
             throw error;
         }
     },
+
     
     /**
      * Bulk mark assets as found
@@ -179,7 +129,7 @@ const API = {
      */
     async bulkRelocate(assetIds, roomId, notes = '') {
         try {
-            const response = await fetch('/api/assets/bulk-relocate', {
+            const response = await fetch('/api/assets', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -945,14 +895,12 @@ const UI = {
 
 // Action handlers module
 const Actions = {
-    /**
+     /**
      * Mark an asset as lost
-     * @param {string} assetId - The ID of the asset
-     * @param {string} assetName - The name of the asset
      */
     async markAssetAsLost(assetId, assetName) {
         try {
-            const result = await API.markAssetAsLost(assetId);
+            const result = await API.updateAsset(assetId, { status: 'Lost' });
             
             UI.showStatusMessage(
                 'Asset Marked as Lost',
@@ -960,25 +908,18 @@ const Actions = {
                 'success'
             );
 
-            // Reload discrepancies after action
             await loadDiscrepancies();
         } catch (error) {
-            UI.showStatusMessage(
-                'Error',
-                'Failed to mark asset as lost. Please try again.',
-                'danger'
-            );
+            UI.showStatusMessage('Error', error.message || 'Failed to mark asset as lost.', 'danger');
         }
     },
     
     /**
-     * Mark an asset as found
-     * @param {string} assetId - The ID of the asset
-     * @param {string} assetName - The name of the asset
+     * Mark an asset as found (return to assigned room)
      */
     async markAssetAsFound(assetId, assetName) {
         try {
-            const result = await API.markAssetAsFound(assetId);
+            const result = await API.updateAsset(assetId, { status: 'Good' });
             
             UI.showStatusMessage(
                 'Asset Marked as Found',
@@ -986,31 +927,21 @@ const Actions = {
                 'success'
             );
 
-            // Reload discrepancies after action
             await loadDiscrepancies();
         } catch (error) {
-            UI.showStatusMessage(
-                'Error',
-                'Failed to mark asset as found. Please try again.',
-                'danger'
-            );
+            UI.showStatusMessage('Error', error.message || 'Failed to mark asset as found.', 'danger');
         }
     },
     
     /**
-     * Mark an asset as found and relocated
-     * @param {string} assetId - The ID of the asset
-     * @param {string} assetName - The name of the asset
-     * @param {string} newRoomId - The ID of the new room
-     * @param {string} notes - Optional notes
+     * Mark an asset as found and relocated to a new room
      */
     async markAssetAsFoundAndRelocated(assetId, assetName, newRoomId, notes) {
         try {
-            const result = await API.relocateAsset(assetId, newRoomId, notes);
+            const result = await API.updateAsset(assetId, { roomId: newRoomId, notes: notes });
             
-            // Hide the modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('relocationModal'));
-            modal.hide();
+            if (modal) modal.hide();
             
             UI.showStatusMessage(
                 'Asset Relocated',
@@ -1018,16 +949,12 @@ const Actions = {
                 'success'
             );
 
-            // Reload discrepancies after action
             await loadDiscrepancies();
         } catch (error) {
-            UI.showStatusMessage(
-                'Error',
-                'Failed to relocate/reassign asset. Please try again.',
-                'danger'
-            );
+            UI.showStatusMessage('Error', error.message || 'Failed to relocate/reassign asset.', 'danger');
         }
     },
+
     
     /**
      * Execute bulk mark found operation

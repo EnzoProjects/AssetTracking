@@ -432,7 +432,7 @@
             // Load all rooms for relocation dropdown
             async function loadRooms() {
                 try {
-                    const response = await fetch('/api/rooms/all');
+                    const response = await fetch('/api/rooms');
                     if (!response.ok) {
                         throw new Error('Failed to fetch rooms');
                     }
@@ -514,124 +514,40 @@
                 }
             });
             
-            // Function to handle marking an asset as lost
-            async function markAssetAsLost(assetId, assetName) {
+            async function handleAssetUpdate(assetId, assetName, updateData, successTitle, successMessage) {
                 try {
-                    const response = await fetch(`/api/asset/${assetId}/mark-lost`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok) {
-                        showStatusMessage(
-                            'Asset Marked as Lost', 
-                            `${assetName} (${assetId}) has been marked as Lost. This asset will be moved to the Lost Assets report.`,
-                            'success'
-                        );
-                        
-                        // Reload the page after short delay
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1500);
-                    } else {
-                        showStatusMessage(
-                            'Error', 
-                            result.message || 'Failed to mark asset as lost. Please try again.',
-                            'danger'
-                        );
-                    }
-                } catch (error) {
-                    console.error('Error marking asset as lost:', error);
-                    showStatusMessage(
-                        'Error', 
-                        'An error occurred while trying to mark the asset as lost. Please try again.',
-                        'danger'
-                    );
-                }
-            }
-            
-            // Function to handle marking an asset as found
-            async function markAssetAsFound(assetId, assetName) {
-                try {
-                    const response = await fetch(`/api/asset/${assetId}/mark-found`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok) {
-                        showStatusMessage(
-                            'Asset Marked as Found', 
-                            `${assetName} (${assetId}) has been marked as Found and returned to its assigned room.`,
-                            'success'
-                        );
-                        
-                        // Reload the page after short delay
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1500);
-                    } else {
-                        showStatusMessage(
-                            'Error', 
-                            result.message || 'Failed to mark asset as found. Please try again.',
-                            'danger'
-                        );
-                    }
-                } catch (error) {
-                    console.error('Error marking asset as found:', error);
-                    showStatusMessage(
-                        'Error', 
-                        'An error occurred while trying to mark the asset as found. Please try again.',
-                        'danger'
-                    );
-                }
-            }
-            
-            // Function to handle marking an asset as found and relocated
-            async function markAssetAsFoundAndRelocated(assetId, assetName, newRoomId) {
-                try {
-                    const response = await fetch(`/api/asset/${assetId}/relocate`, {
-                        method: 'POST',
+                    // This single endpoint handles all partial updates.
+                    const response = await fetch(`/api/assets/${assetId}`, {
+                        method: 'PATCH',
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({
-                            roomId: newRoomId
-                        })
+                        body: JSON.stringify(updateData)
                     });
-                    
+
                     const result = await response.json();
-                    
+
                     if (response.ok) {
-                        showStatusMessage(
-                            'Asset Relocated', 
-                            `${assetName} (${assetId}) has been marked as Found and relocated to the new room.`,
-                            'success'
-                        );
-                        
-                        // Reload the page after short delay
+                        showStatusMessage(successTitle, successMessage, 'success');
+
+                        // Reload the page after a short delay to show the message
                         setTimeout(() => {
                             window.location.reload();
                         }, 1500);
                     } else {
+                        // Server returned an error (e.g., 404, 400, 500)
                         showStatusMessage(
-                            'Error', 
-                            result.message || 'Failed to relocate asset. Please try again.',
+                            'Error',
+                            result.message || 'An unknown error occurred. Please try again.',
                             'danger'
                         );
                     }
                 } catch (error) {
-                    console.error('Error relocating asset:', error);
+                    // Network error or other exception
+                    console.error(`Error updating asset ${assetId}:`, error);
                     showStatusMessage(
-                        'Error', 
-                        'An error occurred while trying to relocate the asset. Please try again.',
+                        'Network Error',
+                        'An error occurred while communicating with the server. Please check your connection and try again.',
                         'danger'
                     );
                 }
