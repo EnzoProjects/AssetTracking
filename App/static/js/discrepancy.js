@@ -45,7 +45,7 @@ const API = {
      */
     async getRooms() {
         try {
-            const response = await fetch('/api/rooms/all');
+            const response = await fetch('/api/rooms');
             if (!response.ok) {
                 throw new Error(`API error: ${response.status}`);
             }
@@ -93,61 +93,35 @@ const API = {
 
     
     /**
-     * Bulk mark assets as found
-     * @param {Array<string>} assetIds - Array of asset IDs to mark as found
-     * @returns {Promise<Object>} Promise resolving to the API response
+     * Performs a bulk partial update on a collection of assets.
+     * This single function communicates with the PATCH /api/assets endpoint.
+     * @param {string} action - The action to perform (e.g., 'mark_found', 'relocate').
+     * @param {Array<string>} assetIds - Array of asset IDs to update.
+     * @param {object} options - An object for additional data (e.g., { roomId, notes }).
+     * @returns {Promise<Object>} A promise resolving to an object { ok: boolean, data: object }.
      */
-    async bulkMarkFound(assetIds) {
+    async bulkUpdateAssets(action, assetIds, options = {}) {
         try {
-            const response = await fetch('/api/assets/bulk-mark-found', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    assetIds: assetIds,
-                    skipFailedScanEvents: true
-                })
-            });
-            
-            return {
-                ok: response.ok,
-                data: await this.parseJsonSafely(response)
-            };
-        } catch (error) {
-            console.error('Error during bulk mark found operation:', error);
-            throw error;
-        }
-    },
-    
-    /**
-     * Bulk relocate assets to a new location
-     * @param {Array<string>} assetIds - Array of asset IDs to relocate
-     * @param {string} roomId - The ID of the destination room
-     * @param {string} notes - Optional notes for the relocation
-     * @returns {Promise<Object>} Promise resolving to the API response
-     */
-    async bulkRelocate(assetIds, roomId, notes = '') {
-        try {
+            // This is the single, consolidated endpoint
             const response = await fetch('/api/assets', {
-                method: 'POST',
+                method: 'PATCH', // Using PATCH as defined in your Flask route
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    assetIds: assetIds,
-                    roomId: roomId,
-                    notes: notes,
-                    skipFailedScanEvents: true
+                    action: action,      // e.g., 'mark_found'
+                    assetIds: assetIds,  // The array of IDs
+                    ...options           // Merges in other properties like { roomId, notes }
                 })
             });
             
+            // Return a structured response for the Actions handler
             return {
                 ok: response.ok,
                 data: await this.parseJsonSafely(response)
             };
         } catch (error) {
-            console.error('Error during bulk relocate operation:', error);
+            console.error(`Error during bulk action '${action}':`, error);
             throw error;
         }
     },
@@ -970,7 +944,7 @@ const Actions = {
         bulkMarkFoundBtn.disabled = true;
 
         try {
-            const { ok, data } = await API.bulkMarkFound(assetIds);
+            const { ok, data } = await API.bulkUpdateAssets('mark_found', assetIds);
             
             // Even with some errors, treat as success if some assets were processed
             if (ok && data) {
@@ -1026,7 +1000,10 @@ const Actions = {
         confirmBtn.disabled = true;
 
         try {
-            const { ok, data } = await API.bulkRelocate(assetIds, newRoomId, notes);
+            const { ok, data } = await API.bulkUpdateAssets('relocate', assetIds, { 
+                roomId: newRoomId, 
+                notes: notes 
+            });
             
             // Hide modal regardless of outcome
             const modal = bootstrap.Modal.getInstance(document.getElementById('relocationModal'));

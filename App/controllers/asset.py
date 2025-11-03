@@ -1,728 +1,458 @@
-# ... (existing imports) ...
+"""
+Controllers for managing assets, including CRUD operations, CSV imports,
+and bulk actions like marking assets as missing, found, or relocated.
+"""
+
 from datetime import datetime, timedelta
-from App.controllers.room import get_room
-from App.models import Asset, Room
-import os, csv
-from App.controllers.assignee import *
-from App.controllers.scanevent import add_scan_event
+import csv
 from flask_jwt_extended import current_user
-from sqlalchemy.exc import IntegrityError # Import IntegrityError
-
+from sqlalchemy.exc import IntegrityError
 from App.database import db
-from App.models.room import Room
-from App.models.scanevent import ScanEvent
+from App.models import Asset, Room, ScanEvent, User # Assuming User model exists for type hinting
+from App.controllers.room import get_room
+from App.controllers.scanevent import add_scan_event
+from App.constants import AssetStatus
 
-# --- Existing functions (get_asset, get_all_assets, etc.) ---
-def get_asset(id):
-    return Asset.query.filter_by(id=id).first()
+# --- Helper Functions ---
 
-def get_all_assets():
+def _get_current_user_id() -> str:
+    """Gets the current user's ID or returns a system default."""
+    if current_user:
+        return current_user.id
+    return "SYSTEM"
+
+def _create_scan_event(asset_id: str, user_id: str, room_id: str, status: str, notes: str) -> ScanEvent | None:
+    """Helper to create a scan event and handle potential errors."""
+    try:
+        return add_scan_event(
+            asset_id=asset_id,
+            user_id=user_id,
+            room_id=room_id,
+            status=status,
+            notes=notes
+        )
+    except Exception as e:
+        print(f"Warning: Failed to create scan event for asset {asset_id}. Error: {e}")
+        return None
+
+# --- Core Asset Controllers ---
+
+def get_asset(asset_id: str) -> Asset | None:
+    """Retrieves an asset by its ID."""
+    return Asset.query.get(asset_id) # .get() is optimized for primary key lookups
+
+def get_all_assets() -> list[Asset]:
+    """Retrieves all assets."""
     return Asset.query.all()
 
-def get_all_assets_by_room_id(room_id):
-    assets = Asset.query.filter_by(room_id=room_id).all()
-    return assets
+def get_all_assets_by_room_id(room_id: str) -> list[Asset]:
+    """Retrieves all assets assigned to a specific room."""
+    return Asset.query.filter_by(room_id=room_id).all()
 
-def get_all_assets_json():
+def get_all_assets_json() -> list[dict]:
+    """Retrieves all assets in JSON format."""
     assets = get_all_assets()
-    if not assets:
-        return[]
-    assets = [asset.get_json() for asset in assets]
-    return assets
+    return [asset.get_json() for asset in assets]
 
-def get_all_assets_by_room_json(room_id):
+def get_all_assets_by_room_json(room_id: str) -> list[dict]:
+    """Retrieves all assets for a room in JSON format."""
     assets = get_all_assets_by_room_id(room_id)
-    if not assets:
-        return[]
-    assets = [asset.get_json() for asset in assets]
-    return assets
+    return [asset.get_json() for asset in assets]
 
-def add_asset(id, description, model, brand, serial_number, room_id, last_located, assignee_id, last_update, notes):
-    # Check if room exists
-    existing_room = Room.query.filter_by(room_id=room_id).first()
-    if existing_room is None:
-        # Room doesn't exist, use the "UNKNOWN" room
-        print(f"Warning: Room {room_id} not found for asset {id}. Assigning to UNKNOWN.")
-        room_id = "UNKNOWN"
-        last_located = room_id  # Also update last_located to match the unknown room
-        status = "Unassigned"
+def add_asset(**kwargs) -> Asset | None:
+    """
+    Adds a new asset to the database.
+    Accepts keyword arguments matching the Asset model.
+    """
+    asset_id = kwargs.get('id')
+    room_id = kwargs.get('room_id')
+
+    # Validate that the assigned room exists, otherwise assign to UNKNOWN
+    if not get_room(room_id):
+        print(f"Warning: Room '{room_id}' not found for asset '{asset_id}'. Assigning to UNKNOWN.")
+        kwargs['room_id'] = "UNKNOWN"
+        kwargs['last_located'] = "UNKNOWN"
+        kwargs['status'] = AssetStatus.UNASSIGNED
     else:
-        # Room exists, set status normally
-        status = "Misplaced"
-        if last_located == room_id:
-            status = "Good"
+        # Determine status based on location
+        if kwargs.get('last_located') == room_id:
+            kwargs['status'] = AssetStatus.GOOD
+        else:
+            kwargs['status'] = AssetStatus.MISPLACED
+            
+    # Ensure last_update is set
+    kwargs.setdefault('last_update', datetime.now())
 
-    newAsset = Asset(id, description, model, brand, serial_number, room_id, last_located, assignee_id, last_update, notes, status)
+    new_asset = Asset(**kwargs)
+    db.session.add(new_asset)
 
     try:
-        db.session.add(newAsset)
         db.session.commit()
-        return newAsset
-    except IntegrityError: # Catch specific duplicate key error
+        return new_asset
+    except IntegrityError:
         db.session.rollback()
-        print(f"Error: Asset with ID {id} already exists.")
+        print(f"Error: Asset with ID '{asset_id}' already exists.")
         return None
-    except Exception as e: # Catch other potential errors
+    except Exception as e:
         db.session.rollback()
-        print(f"Error adding asset {id}: {e}")
+        print(f"Error adding asset '{asset_id}': {e}")
         return None
 
-# --- (set_last_located, set_status, upload_csv, delete_asset, update_asset_location remain the same) ---
-def set_last_located(id,last_located):
-    new_asset = get_asset(id)
-    new_asset.last_located = last_located
+def update_asset_location(asset_id: str, new_location_id: str, user_id: str = None) -> Asset | None:
+    """Updates an asset's last known location and creates a scan event."""
+    asset = get_asset(asset_id)
+    if not asset:
+        print(f"Error: Asset '{asset_id}' not found for location update.")
+        return None
 
-def set_status(id):
-    new_asset= Asset.query.filter_by(id = id).first()
-    if new_asset.room_id == new_asset.last_located :
-        new_asset.status = "Good"
-    else:
-        new_asset.status = "Misplaced"
+    user_id = user_id or _get_current_user_id()
+    old_status = asset.status
+    old_location_id = asset.last_located
 
-    return new_asset
+    # No change in location
+    if old_location_id == new_location_id:
+        return asset
 
+    asset.last_located = new_location_id
+    asset.last_update = datetime.now()
+    asset.status = AssetStatus.GOOD if asset.room_id == new_location_id else AssetStatus.MISPLACED
 
-def upload_csv(file_path):
-    results = {
-        'success': False,
-        'total': 0,
-        'imported': 0,
-        'skipped': 0,
-        'errors': []
-    }
+    # Create descriptive notes for the scan event
+    old_room_name = get_room(old_location_id).room_name if get_room(old_location_id) else f"ID {old_location_id}"
+    new_room_name = get_room(new_location_id).room_name if get_room(new_location_id) else f"ID {new_location_id}"
+    notes = f"Asset found in {new_room_name} (moved from {old_room_name}). Status changed from {old_status} to {asset.status}."
+
+    _create_scan_event(asset_id, user_id, new_location_id, asset.status, notes)
 
     try:
-        with open(file_path, 'r', encoding='utf-8-sig') as file:
-            reader = csv.DictReader(file)
+        db.session.commit()
+        return asset
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error committing location update for asset '{asset_id}': {e}")
+        return None
+    
+def update_asset_details(asset_id: str, **update_data) -> Asset | None:
+    """
+    Updates the non-status, non-location details of an asset.
+    Accepts a dictionary of fields to update via keyword arguments.
+    
+    Args:
+        asset_id: The ID of the asset to update.
+        **update_data: Keyword arguments where the key is the attribute
+                       to update (e.g., description, model, notes).
+
+    Returns:
+        The updated Asset object if successful, None otherwise.
+    """
+    asset = get_asset(asset_id)
+    if not asset:
+        print(f"Error: Asset '{asset_id}' not found for detail update.")
+        return None
+
+    # Define which fields are allowed to be updated through this function
+    # This prevents accidental changes to controlled fields like 'status' or 'room_id'.
+    updatable_fields = [
+        'description',
+        'model',
+        'brand',
+        'serial_number',
+        'assignee_id',
+        'notes'
+    ]
+
+    # Iterate through the provided data and update the asset object
+    for field, value in update_data.items():
+        if field in updatable_fields:
+            setattr(asset, field, value)
+        else:
+            print(f"Warning: Attempted to update non-updatable field '{field}'. Ignoring.")
+
+    # Always update the timestamp when any change is made
+    asset.last_update = datetime.now()
+
+    try:
+        # A scan event is not typically needed for a simple detail change,
+        # but you could add an audit log entry here if desired.
+        db.session.commit()
+        return asset
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error committing detail update for asset '{asset_id}': {e}")
+        return None
 
 
-            expected_columns = ["Item", "Asset Tag", "Model", "Brand", "Serial Number",
-                               "Location", "Condition", "Assignee"]
-            actual_columns = [col.strip() for col in reader.fieldnames]
+def delete_asset(asset_id: str) -> tuple[bool, str]:
+    """Deletes an asset and its associated scan history."""
+    asset = get_asset(asset_id)
+    if not asset:
+        return False, f"Asset '{asset_id}' not found."
 
-            missing_columns = [col for col in expected_columns if col not in actual_columns]
-            if missing_columns:
-                results['errors'].append(f"Missing required columns: {', '.join(missing_columns)}")
+    try:
+        # Cascade delete is often better handled by the database schema,
+        # but explicit deletion is safer if not configured.
+        ScanEvent.query.filter_by(asset_id=asset_id).delete()
+        db.session.delete(asset)
+        db.session.commit()
+        return True, f"Asset '{asset_id}' and its scan history were successfully deleted."
+    except Exception as e:
+        db.session.rollback()
+        return False, f"Failed to delete asset '{asset_id}'. Error: {e}"
+
+# --- CSV Import ---
+
+def upload_csv(file_path: str) -> dict:
+    """Imports assets from a CSV file."""
+    results = {'total': 0, 'imported': 0, 'skipped': 0, 'errors': []}
+    expected_columns = ["Asset Tag", "Item", "Location"]
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            actual_columns = [col.strip() for col in reader.fieldnames or []]
+
+            if not all(col in actual_columns for col in expected_columns):
+                missing = [col for col in expected_columns if col not in actual_columns]
+                results['errors'].append(f"Missing required columns: {', '.join(missing)}")
                 return results
 
-            for row_num, row in enumerate(reader, start=2):  # Start at 2 to account for header row
+            for row_num, row in enumerate(reader, 2):
                 results['total'] += 1
-
                 try:
-                    row = {key.strip(): (value.strip() if isinstance(value, str) else value)
-                          for key, value in row.items()}
-
-                    new_item = row.get('Item', '')
-                    new_id = row.get('Asset Tag', '')
-                    new_model = row.get('Model', '')
-                    new_brand = row.get('Brand', '')
-                    new_sn = row.get('Serial Number', '')
-                    new_room = row.get('Location', '')
-                    new_condition = row.get('Condition', 'Good')  # Get condition from CSV
-                    new_assignee = row.get('Assignee', '')
-                    new_last = datetime.now()
-                    new_notes = None  # Default to None
-
-                    if not new_id:
-                        results['errors'].append(f"Row {row_num}: Missing Asset Tag (required)")
+                    asset_data = {key.strip(): val.strip() for key, val in row.items()}
+                    asset_id = asset_data.get('Asset Tag')
+                    
+                    if not asset_id or not asset_data.get('Item'):
+                        results['errors'].append(f"Row {row_num}: Skipped due to missing Asset Tag or Item description.")
                         results['skipped'] += 1
                         continue
 
-                    if not new_item:
-                        results['errors'].append(f"Row {row_num}: Missing Item description (required)")
-                        results['skipped'] += 1
-                        continue
-
-                    existing_room = Room.query.filter_by(room_id=new_room).first()
-                    if existing_room is None:
-                        # Room doesn't exist, log that it's being redirected to Unknown Room
-                        results['errors'].append(f"Row {row_num}: Location '{row.get('Location', '')}' not found, assigned to Unknown Room")
-
-                    # Let add_asset handle the room assignment and status determination
                     new_asset = add_asset(
-                        id=new_id,
-                        description=new_item,
-                        model=new_model,
-                        brand=new_brand,
-                        serial_number=new_sn,
-                        room_id=new_room,
-                        last_located=new_room,  # Initially set last_located to match room_id
-                        assignee_id=new_assignee,
-                        last_update=new_last,
-                        notes=new_notes
+                        id=asset_id,
+                        description=asset_data.get('Item'),
+                        model=asset_data.get('Model'),
+                        brand=asset_data.get('Brand'),
+                        serial_number=asset_data.get('Serial Number'),
+                        room_id=asset_data.get('Location'),
+                        last_located=asset_data.get('Location'),
+                        assignee_id=asset_data.get('Assignee')
                     )
 
                     if new_asset:
-                        # If the condition from CSV doesn't match the calculated status,
-                        # override it (e.g., for "Missing" or "Lost" conditions)
-                        if new_condition not in ["Good", "Misplaced", "Unassigned", "Found"]: # Added Found
-                            new_asset.status = new_condition
+                        # Override status if a specific condition is provided in the CSV
+                        condition = asset_data.get('Condition')
+                        if condition and condition not in [AssetStatus.GOOD, AssetStatus.MISPLACED]:
+                            new_asset.status = condition
                             db.session.commit()
-
                         results['imported'] += 1
                     else:
-                        # Check if the error was due to duplicate ID
-                        if f"Asset with ID {new_id} already exists." in str(db.session.rollback): # Approximate check
-                             results['errors'].append(f"Row {row_num}: Asset Tag '{new_id}' already exists, skipped.")
-                        else:
-                             results['errors'].append(f"Row {row_num}: Failed to add asset to database.")
+                        results['errors'].append(f"Row {row_num}: Asset Tag '{asset_id}' already exists or failed to add.")
                         results['skipped'] += 1
 
-
-                except IntegrityError as e:
-                    db.session.rollback()
-                    # Check if it's specifically a duplicate primary key error
-                    # This check depends slightly on the DB engine, but often contains 'UNIQUE constraint' or 'Duplicate entry'
-                    error_str = str(e).lower() # Convert error to lowercase string for easier checking
-                    if 'unique constraint' in error_str \
-                    or 'duplicate entry' in error_str \
-                    or 'violates unique constraint' in error_str \
-                    or (hasattr(e, 'orig') and 'duplicate key value violates unique constraint' in str(e.orig).lower()): # More specific check for psycopg2
-                        results['errors'].append(f"Row {row_num}: Asset Tag '{row.get('Asset Tag', '')}' already exists, skipped.")
-                    else:
-                        # Other type of IntegrityError (e.g., foreign key violation if a room didn't exist and wasn't handled)
-                        results['errors'].append(f"Row {row_num}: Database integrity error - {str(e)}")
-                    results['skipped'] += 1
                 except Exception as e:
-                    db.session.rollback()
-                    results['errors'].append(f"Row {row_num}: Error processing row - {str(e)}")
+                    results['errors'].append(f"Row {row_num}: An unexpected error occurred: {e}")
                     results['skipped'] += 1
+                    db.session.rollback() # Ensure rollback on row-level error
 
-            # Set success if at least one asset was imported
-            results['success'] = results['imported'] > 0
-            return results
-
+    except FileNotFoundError:
+        results['errors'].append("CSV file not found.")
     except Exception as e:
-        results['errors'].append(f"File processing error: {str(e)}")
-        return results
+        results['errors'].append(f"An error occurred while processing the file: {e}")
 
+    return results
 
-def delete_asset(id):
-    asset = get_asset(id)
-    if asset:
-        try:
-            # Check for related scan events before deleting
-            scan_events = ScanEvent.query.filter_by(asset_id=id).count()
-            if scan_events > 0:
-                 # Option 1: Prevent deletion
-                 # return False, f"Cannot delete asset {id}. It has associated scan history."
+# --- Status-Based Retrieval ---
 
-                 # Option 2: Delete scan events first (use with caution!)
-                 ScanEvent.query.filter_by(asset_id=id).delete()
-                 print(f"Warning: Deleted {scan_events} scan events associated with asset {id}.")
-
-
-            db.session.delete(asset)
-            db.session.commit()
-            return True, f"Asset {id} was successfully deleted."
-        except Exception as e: # Catch specific exceptions if needed
-            db.session.rollback()
-            return False, f"Failed to delete asset {id}. Error: {str(e)}"
-    return False, f"Asset {id} does not exist."
-
-def update_asset_location(asset_id, new_location, user_id=None):
-    asset = get_asset(asset_id)
-    if not asset:
-        print(f"Error: Asset {asset_id} not found for location update.")
-        return None
-
-    # Store old status and location for changelog
-    old_status = asset.status
-    old_location_id = asset.last_located # Use last_located as the "from" location
-
-    asset.last_located = new_location
-    asset.last_update = datetime.now()
-
-    # Set status based on whether the asset is in its *assigned* room
-    if asset.room_id == new_location:
-        asset.status = "Good"
-    else:
-        asset.status = "Misplaced" # Mark as misplaced if found outside its assigned room
-
-    try:
-
-        # Create a scan event to record this update
-        old_room = get_room(old_location_id)
-        new_room = get_room(new_location)
-        old_room_name = old_room.room_name if old_room else f"Room {old_location_id}"
-        new_room_name = new_room.room_name if new_room else f"Room {new_location}"
-
-        notes = f"Asset found in {new_room_name}."
-        if old_location_id != new_location:
-             notes += f" Moved from {old_room_name}."
-        if old_status != asset.status:
-             notes += f" Status changed from {old_status} to {asset.status}."
-
-
-        # Use the current_user's ID if user_id not provided
-        if not user_id and current_user:
-            user_id = current_user.id
-
-        # If we still don't have a user_id, use a default (e.g., system update)
-        if not user_id:
-            user_id = "SYSTEM" # Or handle as an error if user context is mandatory
-
-        scan_event = add_scan_event(
-            asset_id=asset_id,
-            user_id=user_id,
-            room_id=new_location, # Log the room where it was scanned/found
-            status=asset.status,
-            notes=notes
-        )
-        if not scan_event:
-             print(f"Warning: Failed to create scan event for asset {asset_id} update.")
-             # Decide if this should cause a rollback or just a warning
-
-        db.session.commit()
-        return asset
-    except Exception as e:
-        print(f"Error updating asset location for {asset_id}: {e}")
-        db.session.rollback()
-        return None
-
-
-# Function to mark assets as missing (from audit)
-
-def mark_assets_missing(asset_ids, user_id=None, misplaced_threshold_days=30):
-    processed_count = 0
-    error_count = 0
-    errors = []
-    
-    # Get current time for comparison
-    current_time = datetime.now()
-    # Calculate the threshold date
-    threshold_date = current_time - timedelta(days=misplaced_threshold_days)
-    
-    if not user_id:
-        if current_user:
-            user_id = current_user.id
-        else:
-            user_id = "SYSTEM" # Or raise error if user is required
-
-    # Collect all assets to update first to ensure batch processing works correctly
-    assets_to_update = []
-    scan_events_to_add = []
-
-    for asset_id in asset_ids:
-        asset = get_asset(asset_id)
-        if asset:
-            if asset.status == "Lost":
-                # Don't override "Lost" status
-                print(f"Info: Asset {asset_id} already marked as Lost, skipping.")
-                error_count += 1
-                errors.append(f"Asset {asset_id} already Lost.")
-            elif asset.status == "Misplaced":
-                # Check if the asset has been misplaced for longer than the threshold
-                last_update_time = asset.last_update
-                
-                if last_update_time < threshold_date:
-                    # Asset has been misplaced for too long, mark as missing
-                    old_status = asset.status
-                    asset.status = "Missing"
-                    asset.last_update = current_time
-                    
-                    notes = f"Asset marked as Missing during audit. Previously misplaced for over {misplaced_threshold_days} days. Previous status: {old_status}."
-                    scan_event_data = {
-                        'asset_id': asset_id,
-                        'user_id': user_id,
-                        'room_id': asset.room_id,
-                        'status': "Missing",
-                        'notes': notes
-                    }
-                    
-                    assets_to_update.append(asset)
-                    scan_events_to_add.append(scan_event_data)
-                    processed_count += 1
-                else:
-                    # Asset was recently misplaced, keep as misplaced
-                    print(f"Info: Asset {asset_id} was recently misplaced (less than {misplaced_threshold_days} days ago), keeping status.")
-                    error_count += 1
-                    errors.append(f"Asset {asset_id} recently misplaced.")
-            else:
-                # For any other status, mark as missing
-                old_status = asset.status
-                asset.status = "Missing"
-                asset.last_update = current_time
-                
-                notes = f"Asset marked as Missing during audit. Previous status: {old_status}."
-                scan_event_data = {
-                    'asset_id': asset_id,
-                    'user_id': user_id,
-                    'room_id': asset.room_id,
-                    'status': "Missing",
-                    'notes': notes
-                }
-                
-                assets_to_update.append(asset)
-                scan_events_to_add.append(scan_event_data)
-                processed_count += 1
-        else:
-            errors.append(f"Asset {asset_id} not found.")
-            error_count += 1
-
-    try:
-        if processed_count > 0:
-            # Explicitly add all assets to the session
-            for asset in assets_to_update:
-                db.session.add(asset)
-                
-            # Create all scan events
-            for event_data in scan_events_to_add:
-                add_scan_event(**event_data)
-                
-            # Commit all changes at once
-            db.session.commit()
-            print(f"Successfully marked {processed_count} assets as missing")
-        return processed_count, error_count, errors
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error committing missing assets update: {e}")
-        # Add a general error if commit fails
-        errors.append(f"Database commit error: {e}")
-        return 0, len(asset_ids), errors # Assume all failed if commit fails
-    
-# --- (get_assets_by_status, get_discrepant_assets remain the same) ---
-def get_assets_by_status(status):
+def get_assets_by_status(status: str) -> list[dict]:
+    """Retrieves all assets with a given status in JSON format."""
     assets = Asset.query.filter_by(status=status).all()
-    if not assets:
-        return []
-    assets_json = [asset.get_json() for asset in assets] # Corrected variable name
-    return assets_json
+    return [asset.get_json() for asset in assets]
 
+def get_discrepant_assets() -> list[dict]:
+    """Retrieves all 'Missing' or 'Misplaced' assets in JSON format."""
+    discrepant_statuses = [AssetStatus.MISSING, AssetStatus.MISPLACED]
+    assets = Asset.query.filter(Asset.status.in_(discrepant_statuses)).all()
+    return [asset.get_json() for asset in assets]
 
-def get_discrepant_assets():
-    # Query for assets with status 'Missing' or 'Misplaced'
-    assets = Asset.query.filter(Asset.status.in_(["Missing", "Misplaced"])).all()
-    if not assets:
-        return []
-    assets_json = [asset.get_json() for asset in assets] # Corrected variable name
-    return assets_json
+# --- Single Asset Status Changes ---
 
-
-# Function to mark a single asset as Lost
-def mark_asset_lost(asset_id, user_id=None):
+def mark_asset_lost(asset_id: str, user_id: str = None) -> Asset | None:
+    """Marks a single asset as Lost and records a scan event."""
     asset = get_asset(asset_id)
     if not asset:
-        print(f"Error: Asset {asset_id} not found for marking as Lost.")
+        print(f"Error: Asset '{asset_id}' not found.")
         return None
+    
+    if asset.status == AssetStatus.LOST:
+        return asset # No change needed
 
-    # Store old status for changelog
+    user_id = user_id or _get_current_user_id()
     old_status = asset.status
-
-    # Check if already Lost
-    if old_status == "Lost":
-         print(f"Info: Asset {asset_id} is already marked as Lost.")
-         return asset # Return the asset as is
-
-    # Set status to Lost
-    asset.status = "Lost"
+    asset.status = AssetStatus.LOST
     asset.last_update = datetime.now()
-
-    # Determine user_id
-    if not user_id:
-        if current_user:
-            user_id = current_user.id
-        else:
-            user_id = "SYSTEM" # Or handle error
-
-    # Create a scan event to record this update
+    
     notes = f"Asset marked as Lost. Previous status: {old_status}."
-
-    scan_event = add_scan_event(
-        asset_id=asset_id,
-        user_id=user_id,
-        room_id=asset.room_id, # Log against assigned room
-        status="Lost",
-        notes=notes
-    )
-    if not scan_event:
-         print(f"Warning: Failed to create scan event for Lost asset {asset_id}.")
-         # Decide if rollback is needed
+    _create_scan_event(asset_id, user_id, asset.room_id, asset.status, notes)
 
     try:
         db.session.commit()
         return asset
     except Exception as e:
-        print(f"Error marking asset {asset_id} as lost: {e}")
         db.session.rollback()
+        print(f"Error committing 'Lost' status for asset '{asset_id}': {e}")
         return None
 
-# Function to mark a single asset as Found
-def mark_asset_found(asset_id, user_id=None, return_to_room=True, notes_prefix=""):
-    """Marks an asset as Found.
-
-    Args:
-        asset_id: The ID of the asset.
-        user_id: The ID of the user performing the action.
-        return_to_room (bool): If True, sets last_located to match room_id.
-                               If False, updates room_id to match last_located (reassigns).
-        notes_prefix (str): Optional prefix for the scan event notes (used by bulk actions).
-
-    Returns:
-        Asset object if successful, None otherwise.
+def mark_asset_found(asset_id: str, user_id: str = None, reassign_to_current_location: bool = False) -> Asset | None:
+    """
+    Marks a found asset as 'Good'.
+    - By default, it's marked as returned to its assigned room.
+    - If reassign_to_current_location is True, its assigned room is updated to where it was found.
     """
     asset = get_asset(asset_id)
     if not asset:
-        print(f"Error: Asset {asset_id} not found for marking as Found.")
+        print(f"Error: Asset '{asset_id}' not found.")
         return None
 
-    # Store old status and location for changelog
+    user_id = user_id or _get_current_user_id()
     old_status = asset.status
-    old_location_id = asset.room_id # Assigned room before change
-    found_location_id = asset.last_located # Where it was actually found/last seen
+    action_desc = ""
 
-    # Determine action based on return_to_room flag
-    if return_to_room:
-        # Action: Return to assigned room
-        asset.last_located = asset.room_id # Update last_located to match assigned room
-        final_room_id = asset.room_id
-        action_desc = "returned to assigned room"
+    if reassign_to_current_location:
+        asset.room_id = asset.last_located
+        action_desc = f"reassigned to its current location ({get_room(asset.room_id).room_name if get_room(asset.room_id) else asset.room_id})"
     else:
-        # Action: Reassign to current found location
-        asset.room_id = asset.last_located # Update assigned room to match where it was found
-        final_room_id = asset.last_located
-        action_desc = f"reassigned to current location ({get_room(final_room_id).room_name if get_room(final_room_id) else final_room_id})"
-
-
-    # Set status to Good
-    asset.status = "Good"
+        asset.last_located = asset.room_id
+        action_desc = "returned to its assigned room"
+    
+    asset.status = AssetStatus.GOOD
     asset.last_update = datetime.now()
 
-
-    # Determine user_id
-    if not user_id:
-        if current_user:
-            user_id = current_user.id
-        else:
-            user_id = "SYSTEM" # Or handle error
-
-    # Create scan event notes
-    scan_notes = f"{notes_prefix}Asset marked as Found and {action_desc}. Previous status: {old_status}."
-
-    scan_event = add_scan_event(
-        asset_id=asset_id,
-        user_id=user_id,
-        room_id=final_room_id, # Log against the final room
-        status="Good",
-        notes=scan_notes
-    )
-    if not scan_event:
-         print(f"Warning: Failed to create scan event for Found asset {asset_id}.")
-         # Decide if rollback is needed
+    notes = f"Asset marked as Found and {action_desc}. Previous status: {old_status}."
+    _create_scan_event(asset_id, user_id, asset.room_id, asset.status, notes)
 
     try:
-        # Commit changes for the single asset
-        # db.session.add(asset) # Not needed if asset is already tracked
         db.session.commit()
         return asset
     except Exception as e:
-        print(f"Error marking asset {asset_id} as found: {e}")
         db.session.rollback()
+        print(f"Error committing 'Found' status for asset '{asset_id}': {e}")
         return None
 
+# --- Bulk Action Controllers ---
 
-# --- (update_asset_details remains the same) ---
-def update_asset_details(asset_id, description, model, brand, serial_number, assignee_id, notes):
-    """Update basic asset details excluding location and status fields"""
-    asset = get_asset(asset_id)
-    if not asset:
-        return None
-
-    # Store original values for logging if needed (optional)
-    # old_description = asset.description ...
-
-    # Update only the editable fields
-    asset.description = description
-    asset.model = model
-    asset.brand = brand
-    asset.serial_number = serial_number
-    asset.assignee_id = assignee_id
-    asset.notes = notes
-
-    # Automatically update the last_update timestamp
-    asset.last_update = datetime.now()
-
-    try:
-        # Add a scan event or audit log entry here if desired
-        # e.g., log_change(asset_id, current_user.id, "Details Updated", old_values, new_values)
-
-        db.session.commit()
-        return asset
-    except Exception as e:
-        print(f"Error updating asset details for {asset_id}: {e}")
-        db.session.rollback()
-        return None
-
-
-# --- NEW BULK ACTION CONTROLLERS ---
-
-def bulk_mark_assets_found(asset_ids, user_id, notes="", skip_failed_scan_events=False):
-    """Marks multiple assets as Found and returns them to their assigned rooms.
-    
-    Args:
-        asset_ids: List of asset IDs to mark as found
-        user_id: ID of the user performing the action
-        notes: Optional notes to add to scan events
-        skip_failed_scan_events: If True, continue processing assets even if scan event creation fails
-    
-    Returns:
-        Tuple of (processed_count, error_count, errors list)
+def bulk_update_asset_status(asset_ids: list[str], new_status: str, user_id: str, notes_template: str) -> tuple[int, int, list]:
     """
-    processed_count = 0
-    error_count = 0
-    errors = []
+    Generic helper to bulk-update asset statuses.
+    `notes_template` can use placeholders like {old_status}.
+    """
+    processed_count, error_count, errors = 0, 0, []
+    user_id = user_id or _get_current_user_id()
     
-    if not user_id:
-        if current_user:
-             user_id = current_user.id
-        else:
-             # Handle missing user context - maybe raise an error or use SYSTEM
-             return 0, len(asset_ids), ["User context required for bulk action."]
-
-    notes_prefix = f"Bulk Mark Found action by User {user_id}. "
-    if notes:
-        notes_prefix += f"Note: {notes}. "
-
-    # First update all assets in memory
-    assets_to_update = []
-    scan_events_to_add = []
-    
-    # Prepare all updates as a batch
-    for asset_id in asset_ids:
-        asset = get_asset(asset_id)
-        if not asset:
-            error_count += 1
-            errors.append(f"Asset {asset_id} not found")
-            continue
-            
-        # Store old status and location for changelog
-        old_status = asset.status
-        
-        # Set the asset as found and returned to its room
-        asset.last_located = asset.room_id  # Return to assigned room
-        asset.status = "Good"
-        asset.last_update = datetime.now()
-        
-        # Create scan event notes
-        scan_notes = f"{notes_prefix}Asset marked as Found and returned to assigned room. Previous status: {old_status}."
-        
-        # Prepare scan event data
-        scan_event_data = {
-            'asset_id': asset_id,
-            'user_id': user_id,
-            'room_id': asset.room_id,
-            'status': "Good",
-            'notes': scan_notes
-        }
-        
-        assets_to_update.append(asset)
-        scan_events_to_add.append(scan_event_data)
-    
-    # Now process everything in a single database transaction
-    try:
-        # Add all updated assets to the session
-        for asset in assets_to_update:
-            db.session.add(asset)
-            
-        # Try to create all scan events
-        for event_data in scan_events_to_add:
-            try:
-                add_scan_event(**event_data)
-                processed_count += 1
-            except Exception as e:
-                if skip_failed_scan_events:
-                    # Log the error but continue processing
-                    print(f"Warning: Failed to create scan event for Found asset {event_data['asset_id']}. Error: {str(e)}")
-                    errors.append(f"Scan event creation failed for asset {event_data['asset_id']}: {str(e)}")
-                    error_count += 1
-                else:
-                    # Re-raise the exception if we're not skipping failures
-                    raise
-        
-        # Commit all changes at once
-        db.session.commit()
-        print(f"Successfully marked {processed_count} assets as found")
-        return processed_count, error_count, errors
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error committing bulk mark-as-found: {e}")
-        errors.append(f"Database error: {str(e)}")
-        return 0, len(asset_ids), errors
-  
-def bulk_relocate_assets(asset_ids, new_room_id, user_id, notes=""):
-    """Marks multiple assets as Found and relocates/reassigns them to a new room."""
-    processed_count = 0
-    error_count = 0
-    errors = []
-
-    if not user_id:
-        if current_user:
-             user_id = current_user.id
-        else:
-             return 0, len(asset_ids), ["User context required for bulk action."]
-
-    # Check if the target room exists
-    target_room = get_room(new_room_id)
-    if not target_room:
-        return 0, len(asset_ids), [f"Target room {new_room_id} not found."]
-    target_room_name = target_room.room_name
-
-
-    notes_prefix = f"Bulk Relocate action by User {user_id} to {target_room_name} ({new_room_id}). "
-
-    assets_to_update = []
-    scan_events_to_add = []
+    assets = Asset.query.filter(Asset.id.in_(asset_ids)).all()
+    asset_map = {asset.id: asset for asset in assets}
 
     for asset_id in asset_ids:
-        asset = get_asset(asset_id)
+        asset = asset_map.get(asset_id)
         if not asset:
+            errors.append(f"Asset '{asset_id}' not found.")
             error_count += 1
-            errors.append(f"Asset {asset_id} not found.")
             continue
+        
+        if asset.status == new_status:
+            continue # No change needed
 
         old_status = asset.status
-        old_location_id = asset.room_id # Original assigned room
-
-        # Update asset fields directly for bulk processing
-        asset.last_located = new_room_id
-        asset.room_id = new_room_id # Reassign to the new room
-        asset.status = "Good"
+        asset.status = new_status
         asset.last_update = datetime.now()
-        assets_to_update.append(asset) # Add to list for bulk save
-
-        # Prepare scan event data (don't create yet)
-        old_room_name = get_room(old_location_id).room_name if get_room(old_location_id) else f"Room {old_location_id}"
-        scan_note = f"{notes_prefix}Asset relocated from {old_room_name}. Previous status: {old_status}."
-        if notes:
-         scan_note += f"\nUser Note: {notes}. "
-
-        scan_event_data = {
-             'asset_id': asset_id,
-             'user_id': user_id,
-             'room_id': new_room_id,
-             'status': "Good",
-             'notes': scan_note
-        }
-        scan_events_to_add.append(scan_event_data)
+        
+        notes = notes_template.format(old_status=old_status)
+        _create_scan_event(asset_id, user_id, asset.room_id, new_status, notes)
         processed_count += 1
-
-    # Perform bulk update and scan event creation within a transaction
-    if assets_to_update:
+    
+    if processed_count > 0:
         try:
-            # Bulk save assets
-            db.session.add_all(assets_to_update)
-
-            # Bulk create scan events (more efficient if add_scan_event supports bulk or direct insert)
-            # For simplicity, calling add_scan_event individually here, but consider optimizing
-            for event_data in scan_events_to_add:
-                 add_scan_event(**event_data) # Unpack dict as arguments
-
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            print(f"Error during bulk relocate commit: {e}")
-            # Mark all processed items as failed if commit fails
             return 0, len(asset_ids), [f"Database commit error: {e}"]
+            
+    return processed_count, error_count, errors
 
+def mark_assets_missing(asset_ids: list[str], user_id: str = None, misplaced_threshold_days: int = 30) -> tuple[int, int, list]:
+    """Marks a list of assets as 'Missing' after an audit."""
+    processed_count, error_count, errors = 0, 0, []
+    user_id = user_id or _get_current_user_id()
+    threshold_date = datetime.now() - timedelta(days=misplaced_threshold_days)
+    
+    assets = Asset.query.filter(Asset.id.in_(asset_ids)).all()
 
+    for asset in assets:
+        if asset.status == AssetStatus.LOST:
+            errors.append(f"Asset {asset.id} is already Lost, skipping.")
+            error_count += 1
+            continue
+
+        if asset.status == AssetStatus.MISPLACED and asset.last_update >= threshold_date:
+            errors.append(f"Asset {asset.id} was recently misplaced, skipping.")
+            error_count += 1
+            continue
+        
+        old_status = asset.status
+        asset.status = AssetStatus.MISSING
+        asset.last_update = datetime.now()
+        
+        notes = f"Audit complete: Asset marked as Missing. Previous status: {old_status}."
+        _create_scan_event(asset.id, user_id, asset.room_id, AssetStatus.MISSING, notes)
+        processed_count += 1
+    
+    if processed_count > 0:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return 0, len(asset_ids), [f"Database commit error: {e}"]
+            
+    return processed_count, error_count, errors
+
+def bulk_relocate_assets(asset_ids: list[str], new_room_id: str, user_id: str = None, notes: str = "") -> tuple[int, int, list]:
+    """Relocates and reassigns multiple assets to a new room, marking them as 'Good'."""
+    processed_count, error_count, errors = 0, 0, []
+    user_id = user_id or _get_current_user_id()
+
+    target_room = get_room(new_room_id)
+    if not target_room:
+        return 0, len(asset_ids), [f"Target room '{new_room_id}' not found."]
+
+    assets_to_update = Asset.query.filter(Asset.id.in_(asset_ids)).all()
+    
+    for asset in assets_to_update:
+        old_status = asset.status
+        old_room_name = get_room(asset.room_id).room_name if get_room(asset.room_id) else asset.room_id
+
+        asset.room_id = new_room_id
+        asset.last_located = new_room_id
+        asset.status = AssetStatus.GOOD
+        asset.last_update = datetime.now()
+        
+        scan_note = f"Bulk Relocate: Moved from {old_room_name} to {target_room.room_name}. Previous status: {old_status}."
+        if notes:
+            scan_note += f" Note: {notes}"
+            
+        _create_scan_event(asset.id, user_id, new_room_id, AssetStatus.GOOD, scan_note)
+        processed_count += 1
+    
+    if processed_count > 0:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return 0, processed_count, [f"Database commit error: {e}"]
+            
+    # Calculate errors for assets not found
+    found_ids = {asset.id for asset in assets_to_update}
+    for asset_id in asset_ids:
+        if asset_id not in found_ids:
+            errors.append(f"Asset '{asset_id}' not found.")
+            error_count += 1
+            
     return processed_count, error_count, errors
